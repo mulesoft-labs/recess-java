@@ -11,8 +11,8 @@ public class RecessWrapperTest {
     public void testRunRecess() throws Exception {
         URI css = JavascriptRunner.getURIFromResources(this.getClass(), "npm.css");
         HashMap<String, Object> config = new HashMap<String, Object>();
-//        config.put("cli", false);
+        config.put("cli", false);
         config.put("compile", true);
-        new Recess(new String[] {"asd"}, config).run();
+        new Recess(new Object[] {css.getPath(), css.getPath()}, config, "output.css",true).run();
     }
 }

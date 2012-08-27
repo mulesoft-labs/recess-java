@@ -1,23 +1,16 @@
 package org.mule.tools.recess;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.io.FileUtils;
-import org.mozilla.javascript.Context;
-import org.mozilla.javascript.Function;
-import org.mozilla.javascript.NativeObject;
+import org.mozilla.javascript.*;
 import org.mozilla.javascript.tools.shell.Global;
 import org.mule.tools.rhinodo.api.NodeModule;
 import org.mule.tools.rhinodo.api.Runnable;
 import org.mule.tools.rhinodo.impl.JavascriptRunner;
 import org.mule.tools.rhinodo.impl.NodeModuleFactoryImpl;
 import org.mule.tools.rhinodo.impl.NodeModuleImpl;
-import sun.org.mozilla.javascript.internal.BaseFunction;
-import sun.org.mozilla.javascript.internal.Scriptable;
-import sun.org.mozilla.javascript.internal.Undefined;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -26,16 +19,18 @@ class RecessWrapper implements Runnable {
     private NodeModuleImpl recess;
     private JavascriptRunner javascriptRunner;
     private Map<String, Object> config;
-    private String[] files;
+    private Object[] files;
     private final String outputFile;
+    private boolean merge;
 
-    public RecessWrapper(String[] files, Map<String, Object> config, String outputFile) {
+    public RecessWrapper(Object[] files, Map<String, Object> config, String outputFile, boolean merge) {
         if ( config == null ) {
             throw new RuntimeException("config cannot be null");
         }
         this.files = files;
         this.config = config;
         this.outputFile = outputFile;
+        this.merge = merge;
 
         recess = new NodeModuleImpl("META-INF/recess");
 
@@ -59,38 +54,81 @@ class RecessWrapper implements Runnable {
     public void run(Context ctx, Global global) {
         global.put("__dirname", global, Context.toString(recess.getPath().getPath()));
 
-        ObjectMapper objectMapper = new ObjectMapper();
-
-        URI sample = JavascriptRunner.getURIFromResources(this.getClass(), "npm.css");
-
         Function require = (Function)global.get("require", global);
         Object result = require.call(ctx,global,global,new String [] {"recess"});
 
         NativeObject nobj = new NativeObject();
         for (Map.Entry<String, Object> entry : config.entrySet()) {
-            nobj.defineProperty(Context.toString(entry.getKey()), Context.javaToJS(entry.getValue(),nobj), NativeObject.READONLY);
+            nobj.defineProperty(entry.getKey(), Context.javaToJS(entry.getValue(),nobj), NativeObject.READONLY);
         }
 
         Function recess = (Function) Context.jsToJava(result, Function.class);
-        recess.call(ctx,global,global,new Object[] {Context.toString(sample.getPath()), nobj, new BaseFunction() {
+
+        recess.call(ctx,global,global,new Object[] {ctx.newArray(global, files), nobj, new BaseFunction() {
             @Override
-            public Object call(sun.org.mozilla.javascript.internal.Context context, Scriptable scriptable, Scriptable scriptable1, Object[] objects) {
-                NativeObject err = objects.length > 0 ? (NativeObject) objects[0] : null;
-                String result = objects.length > 1 ? (String) objects[1] : null;
+            public Object call(Context context, Scriptable scriptable, Scriptable scriptable1, Object[] objects) {
+                Scriptable err = objects.length > 0 ? (Scriptable) objects[0] : null;
+                Scriptable result = objects.length > 1 ? (Scriptable) objects[1] : null;
                 callback(err,result);
-                System.out.println("res" + result);
                 return Undefined.instance;
             }
 
-            private void callback(NativeObject error, String result) {
-                try {
-                    FileUtils.write(new File(outputFile), result);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+            private void callback(Scriptable error, Scriptable result) {
+                if (error != null && error != Undefined.instance) {
+                    if ( error instanceof NativeArray ) {
+                        NativeArray errorAsNativeArray = (NativeArray) error;
+                        for (Object o : errorAsNativeArray) {
+                            if ( o instanceof NativeObject ) {
+                                throw new RuntimeException(((NativeObject) o).get("message").toString());
+                            }
+                        }
+                    }
+                    throw new RuntimeException(error.toString());
+                }
+
+                if(result instanceof NativeArray) {
+                    NativeArray resultAsNativeArray = (NativeArray) result;
+                    for (Object o : resultAsNativeArray) {
+                        writeOutputResult(o, merge);
+                    }
+                } else {
+                    writeOutputResult(result, false);
                 }
             }
         }});
 
+    }
+
+    private void writeOutputResult(Object document, boolean merge) {
+        if (document == null || !(document instanceof NativeObject)) {
+            return;
+        }
+
+        NativeObject documentObject = (NativeObject) document;
+
+        NativeArray output = (NativeArray) documentObject.get("output", documentObject);
+
+        String path = (String) documentObject.get("path", documentObject);
+
+        String substring = path.substring(path.lastIndexOf(File.separator));
+        if ( substring.endsWith(".css") || substring.endsWith(".less")) {
+            substring = substring.substring(0, substring.lastIndexOf(".") - 1);
+        }
+
+        File outputFile;
+        if ( merge ) {
+            outputFile = new File(this.outputFile);
+        } else {
+            outputFile = new File(substring);
+        }
+
+        if (output.size() > 1) {
+            try {
+                FileUtils.write(outputFile, output.get(0).toString(), true);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
 }

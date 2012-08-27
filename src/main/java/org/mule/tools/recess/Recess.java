@@ -4,8 +4,8 @@ import java.util.Map;
 
 public class Recess {
     private RecessWrapper recessWrapper;
-    public Recess(String [] files, Map<String, Object> recessConfig)  {
-        recessWrapper = new RecessWrapper(files, recessConfig, "hello_world.css");
+    public Recess(Object [] files, Map<String, Object> recessConfig, String outputFile, boolean merge)  {
+        recessWrapper = new RecessWrapper(files, recessConfig, outputFile, merge);
     }
 
     public void run() {
