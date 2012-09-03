@@ -8,10 +8,14 @@ import org.mule.tools.rhinodo.api.Runnable;
 import org.mule.tools.rhinodo.impl.JavascriptRunner;
 import org.mule.tools.rhinodo.impl.NodeModuleFactoryImpl;
 import org.mule.tools.rhinodo.impl.NodeModuleImpl;
+import org.mule.tools.rhinodo.rhino.RhinoHelper;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 class Recess implements Runnable {
     private NodeModuleImpl recess;
@@ -21,8 +25,10 @@ class Recess implements Runnable {
     private final String outputFile;
     private boolean merge;
     private String outputDirectory;
+    RhinoHelper rhinoHelper;
 
     public Recess(Object[] files, Map<String, Object> config, String outputFile, boolean merge, String destDir, String outputDirectory) {
+        this.rhinoHelper = new RhinoHelper();
 
         if (merge && outputFile == null) {
             throw new IllegalArgumentException("outputFile cannot be null");
@@ -64,10 +70,7 @@ class Recess implements Runnable {
         Function require = (Function)global.get("require", global);
         Object result = require.call(ctx,global,global,new String [] {"recess"});
 
-        NativeObject nobj = new NativeObject();
-        for (Map.Entry<String, Object> entry : config.entrySet()) {
-            nobj.defineProperty(entry.getKey(), Context.javaToJS(entry.getValue(),nobj), NativeObject.READONLY);
-        }
+        NativeObject nobj = rhinoHelper.mapToNativeObject(config);
 
         Function recess = (Function) Context.jsToJava(result, Function.class);
 
