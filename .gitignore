@@ -1,3 +1,10 @@
 .idea
 target
 *.iml
+src/main/resources/META-INF/abbrev
+src/main/resources/META-INF/colors
+src/main/resources/META-INF/less
+src/main/resources/META-INF/nopt
+src/main/resources/META-INF/recess
+src/main/resources/META-INF/underscore
+src/main/resources/META-INF/watch
