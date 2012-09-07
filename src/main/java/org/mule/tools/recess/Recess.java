@@ -26,6 +26,8 @@ class Recess implements Runnable {
     RhinoHelper rhinoHelper;
     private ConsoleFactory consoleFactory;
     private Set<String> alreadyWritten;
+    private Context ctx;
+    private Global global;
 
     public Recess(ConsoleFactory consoleFactory, Object[] files, Map<String, Object> config, String outputFile, boolean merge, String destDir, String outputDirectory) {
         this.rhinoHelper = new RhinoHelper();
@@ -67,6 +69,8 @@ class Recess implements Runnable {
 
     @Override
     public void executeJavascript(final Context ctx, final Global global) {
+        this.ctx = ctx;
+        this.global = global;
         global.put("__dirname", global, Context.toString(recess.getPath()));
 
         Function require = (Function)global.get("require", global);
@@ -134,7 +138,7 @@ class Recess implements Runnable {
             outputFile = new File(outputDirectory, prefix + ".css");
         }
 
-        if (result.getOutput().size() > 0) {
+        if (result.getOutput().size() > 0 && result.getOutput().get(0) != null) {
             try {
                 String path = outputFile.getPath();
                 FileUtils.write(outputFile, result.getOutput().get(0).toString(), alreadyWritten.contains(path));
@@ -142,7 +146,15 @@ class Recess implements Runnable {
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
+        } else {
+            log(ctx, global, "Not saving result as output was null or invalid");
         }
+    }
+
+    private void log(Context ctx, Global global, String stringToPrint) {
+        Scriptable console = javascriptRunner.getConsole();
+        Function function = (Function) console.get("log", console);
+        function.call(ctx, global, console, new Object[]{stringToPrint});
     }
 
     private class RecessCallback extends BaseFunction {
@@ -169,13 +181,11 @@ class Recess implements Runnable {
                     for (Object o : errorAsNativeArray) {
                         if (o instanceof NativeObject) {
                             NativeObject nativeObject = (NativeObject) o;
-                            Scriptable console = javascriptRunner.getConsole();
-                            Function function = (Function) console.get("log", console);
                             String stringToPrint = "Error: %s in file: %s line: %d column: %d";
                             stringToPrint = String.format(stringToPrint, nativeObject.get("message"),
                                     nativeObject.get("filename"), ((Double) nativeObject.get("line")).longValue(),
                                     ((Double) nativeObject.get("column")).longValue());
-                            function.call(ctx, global, console, new Object[]{stringToPrint});
+                            Recess.this.log(ctx, global, stringToPrint);
 
                         }
                     }
@@ -206,5 +216,6 @@ class Recess implements Runnable {
                 writeOutputResult(result1, result1.getFileNameWithoutExtension(), false);
             }
         }
+
     }
 }

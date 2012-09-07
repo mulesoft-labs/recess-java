@@ -48,10 +48,10 @@
                         </goals>
                         <configuration>
                             <packages>
-                                <!-- 0.3.0 version of colors 
+                                <!-- Neither 0.3.0 nor 0.6.0-1 version of colors 
                                      does not work correctly in rhinodo 
                                      (or at least together with recess) -->
-                                <package>colors:0.3.0</package>
+                                <package>colors:0.5.1</package>
                                 <package>recess:1.1.4</package>
                             </packages>
                         </configuration>
