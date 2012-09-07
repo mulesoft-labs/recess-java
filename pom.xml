@@ -51,8 +51,8 @@
                                 <!-- 0.3.0 version of colors 
                                      does not work correctly in rhinodo 
                                      (or at least together with recess) -->
-                                <package>colors:0.6.0-1</package>
-                                <package>recess:1.1.6</package>
+                                <package>colors:0.3.0</package>
+                                <package>recess:1.1.4</package>
                             </packages>
                         </configuration>
                     </execution>
