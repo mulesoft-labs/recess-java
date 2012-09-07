@@ -3,6 +3,7 @@ package org.mule.tools.recess;
 import org.apache.commons.io.FileUtils;
 import org.mozilla.javascript.*;
 import org.mozilla.javascript.tools.shell.Global;
+import org.mule.tools.rhinodo.api.ConsoleFactory;
 import org.mule.tools.rhinodo.api.NodeModule;
 import org.mule.tools.rhinodo.api.Runnable;
 import org.mule.tools.rhinodo.impl.JavascriptRunner;
@@ -12,10 +13,7 @@ import org.mule.tools.rhinodo.rhino.RhinoHelper;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 class Recess implements Runnable {
     private NodeModuleImpl recess;
@@ -26,9 +24,12 @@ class Recess implements Runnable {
     private boolean merge;
     private String outputDirectory;
     RhinoHelper rhinoHelper;
+    private ConsoleFactory consoleFactory;
+    private Set<String> alreadyWritten;
 
-    public Recess(Object[] files, Map<String, Object> config, String outputFile, boolean merge, String destDir, String outputDirectory) {
+    public Recess(ConsoleFactory consoleFactory, Object[] files, Map<String, Object> config, String outputFile, boolean merge, String destDir, String outputDirectory) {
         this.rhinoHelper = new RhinoHelper();
+        this.alreadyWritten = new HashSet<String>();
 
         if (merge && outputFile == null) {
             throw new IllegalArgumentException("outputFile cannot be null");
@@ -44,6 +45,7 @@ class Recess implements Runnable {
         this.config = config;
         this.outputFile = outputFile;
         this.merge = merge;
+        this.consoleFactory = consoleFactory;
 
         recess = NodeModuleImpl.fromJar(this.getClass(), "META-INF/recess", destDir);
 
@@ -56,7 +58,7 @@ class Recess implements Runnable {
                 NodeModuleImpl.fromJar(this.getClass(), "META-INF/watch", destDir),
                 recess);
 
-        javascriptRunner = new JavascriptRunner(new NodeModuleFactoryImpl(nodeModuleList), this, destDir);
+        javascriptRunner = JavascriptRunner.withConsoleFactory(consoleFactory, new NodeModuleFactoryImpl(nodeModuleList), this, destDir);
     }
 
     public void run() {
@@ -64,7 +66,7 @@ class Recess implements Runnable {
     }
 
     @Override
-    public void executeJavascript(Context ctx, Global global) {
+    public void executeJavascript(final Context ctx, final Global global) {
         global.put("__dirname", global, Context.toString(recess.getPath()));
 
         Function require = (Function)global.get("require", global);
@@ -73,53 +75,8 @@ class Recess implements Runnable {
         NativeObject nobj = rhinoHelper.mapToNativeObject(config);
 
         Function recess = (Function) Context.jsToJava(result, Function.class);
-
-        recess.call(ctx,global,global,new Object[] {ctx.newArray(global, files), nobj, new BaseFunction() {
-            @Override
-            public Object call(Context context, Scriptable scriptable, Scriptable thisObject, Object[] objects) {
-                Scriptable err = objects.length > 0 ? (Scriptable) objects[0] : null;
-                Scriptable result = objects.length > 1 ? (Scriptable) objects[1] : null;
-                callback(err,result);
-                return Undefined.instance;
-            }
-
-            private void callback(Scriptable error, Scriptable result) {
-                if (error != null && error != Undefined.instance) {
-                    if ( error instanceof NativeArray ) {
-                        NativeArray errorAsNativeArray = (NativeArray) error;
-                        for (Object o : errorAsNativeArray) {
-                            if ( o instanceof NativeObject ) {
-                                throw new RuntimeException(((NativeObject) o).get("message").toString());
-                            }
-                        }
-                    }
-                    throw new RuntimeException(error.toString());
-                }
-
-                if(result instanceof NativeArray) {
-                    HashMap<String, RecessResult> recessResults = new HashMap<String, RecessResult>();
-                    NativeArray resultAsNativeArray = (NativeArray) result;
-                    for (Object o : resultAsNativeArray) {
-                        RecessResult recessResult = RecessResult.fromNativeObjectResult(o);
-                        if ( recessResults.containsKey(recessResult.getFileNameWithoutExtension()) ) {
-                            recessResults.put(recessResult.getFileNameWithExtension(), recessResult);
-                            RecessResult oldRecessResult = recessResults.get(recessResult.getFileNameWithoutExtension());
-                            recessResults.put(oldRecessResult.getFileNameWithExtension(), oldRecessResult);
-                        } else {
-                            recessResults.put(recessResult.getFileNameWithoutExtension(), recessResult);
-                        }
-                    }
-
-                    for (Map.Entry<String, RecessResult> filePrefixAndrecessResult : recessResults.entrySet()) {
-                        writeOutputResult(filePrefixAndrecessResult.getValue(), filePrefixAndrecessResult.getKey(), merge);
-                    }
-
-                } else {
-                    RecessResult result1 = RecessResult.fromNativeObjectResult(result);
-                    writeOutputResult(result1, result1.getFileNameWithoutExtension(), false);
-                }
-            }
-        }});
+        BaseFunction recessCallback = new RecessCallback(ctx, global);
+        recess.call(ctx, global, global, new Object[]{ctx.newArray(global, files), nobj, recessCallback});
 
     }
 
@@ -170,7 +127,6 @@ class Recess implements Runnable {
     }
 
     private void writeOutputResult(RecessResult result, String prefix, boolean merge) {
-
         File outputFile;
         if ( merge ) {
             outputFile = new File(this.outputFile);
@@ -180,11 +136,75 @@ class Recess implements Runnable {
 
         if (result.getOutput().size() > 0) {
             try {
-                FileUtils.write(outputFile, result.getOutput().get(0).toString(), true);
+                String path = outputFile.getPath();
+                FileUtils.write(outputFile, result.getOutput().get(0).toString(), alreadyWritten.contains(path));
+                alreadyWritten.add(path);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         }
     }
 
+    private class RecessCallback extends BaseFunction {
+        private final Context ctx;
+        private final Global global;
+
+        public RecessCallback(Context ctx, Global global) {
+            this.ctx = ctx;
+            this.global = global;
+        }
+
+        @Override
+        public Object call(Context context, Scriptable scriptable, Scriptable thisObject, Object[] objects) {
+            Scriptable err = objects.length > 0 ? (Scriptable) objects[0] : null;
+            Scriptable result = objects.length > 1 ? (Scriptable) objects[1] : null;
+            callback(err, result);
+            return Undefined.instance;
+        }
+
+        private void callback(Scriptable error, Scriptable result) {
+            if (error != null && error != Undefined.instance) {
+                if (error instanceof NativeArray) {
+                    NativeArray errorAsNativeArray = (NativeArray) error;
+                    for (Object o : errorAsNativeArray) {
+                        if (o instanceof NativeObject) {
+                            NativeObject nativeObject = (NativeObject) o;
+                            Scriptable console = javascriptRunner.getConsole();
+                            Function function = (Function) console.get("log", console);
+                            String stringToPrint = "Error: %s in file: %s line: %d column: %d";
+                            stringToPrint = String.format(stringToPrint, nativeObject.get("message"),
+                                    nativeObject.get("filename"), ((Double) nativeObject.get("line")).longValue(),
+                                    ((Double) nativeObject.get("column")).longValue());
+                            function.call(ctx, global, console, new Object[]{stringToPrint});
+
+                        }
+                    }
+                }
+                throw new RuntimeException(error.toString());
+            }
+
+            if (result instanceof NativeArray) {
+                HashMap<String, RecessResult> recessResults = new HashMap<String, RecessResult>();
+                NativeArray resultAsNativeArray = (NativeArray) result;
+                for (Object o : resultAsNativeArray) {
+                    RecessResult recessResult = RecessResult.fromNativeObjectResult(o);
+                    if (recessResults.containsKey(recessResult.getFileNameWithoutExtension())) {
+                        recessResults.put(recessResult.getFileNameWithExtension(), recessResult);
+                        RecessResult oldRecessResult = recessResults.get(recessResult.getFileNameWithoutExtension());
+                        recessResults.put(oldRecessResult.getFileNameWithExtension(), oldRecessResult);
+                    } else {
+                        recessResults.put(recessResult.getFileNameWithoutExtension(), recessResult);
+                    }
+                }
+
+                for (Map.Entry<String, RecessResult> filePrefixAndrecessResult : recessResults.entrySet()) {
+                    writeOutputResult(filePrefixAndrecessResult.getValue(), filePrefixAndrecessResult.getKey(), merge);
+                }
+
+            } else {
+                RecessResult result1 = RecessResult.fromNativeObjectResult(result);
+                writeOutputResult(result1, result1.getFileNameWithoutExtension(), false);
+            }
+        }
+    }
 }
