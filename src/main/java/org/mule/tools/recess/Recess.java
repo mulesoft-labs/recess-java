@@ -221,7 +221,7 @@ class Recess implements Runnable {
 
             } else {
                 RecessResult result1 = RecessResult.fromNativeObjectResult(result);
-                writeOutputResult(result1, result1.getFileNameWithoutExtension(), false);
+                writeOutputResult(result1, result1.getFileNameWithoutExtension(), merge);
             }
         }
 
